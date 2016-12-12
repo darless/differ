@@ -1,0 +1,6 @@
+{
+  "name": "Differ",
+  "tagline": "",
+  "body": "# differ\r\nLook at the difference between compressed files / directories / ...\r\n\r\n# Setup\r\nThe setup is pretty simple:\r\n1. Run *make all*\r\n2. Read the docs for examples in *docs/_build/html/index.html*\r\n\r\n# Code Layout\r\n\r\nThis project uses the following structure:\r\n\r\nhttp://docs.python-guide.org/en/latest/writing/structure/\r\n",
+  "note": "Don't delete this file! It's used internally to help with page regeneration."
+}
