@@ -1,0 +1,11 @@
+# .coveragerc to control coverage for pytest
+[report]
+omit =
+  # Omit the main file used with argparse
+  differ/main.py
+
+  # Omit the tests themselves
+  tests/*
+
+  # Ignore the setup.py file
+  setup.py

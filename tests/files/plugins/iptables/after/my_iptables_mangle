@@ -1,0 +1,20 @@
+Chain PREROUTING (policy ACCEPT 408 packets, 286603 bytes)
+    pkts      bytes target     prot opt in     out     source               destination         
+
+Chain INPUT (policy ACCEPT 408 packets, 286603 bytes)
+    pkts      bytes target     prot opt in     out     source               destination         
+
+Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+    pkts      bytes target     prot opt in     out     source               destination         
+      60      623 DIFFER-TEST-1  all  --  *      *       1.1.1.1              2.2.2.2             
+       2        2 DIFFER-TEST-2  all  --  *      *       1.1.1.1              8.8.8.8             
+       2        2 DIFFER-TEST-4  all  --  *      *       1.1.1.1              8.8.8.8             
+
+Chain OUTPUT (policy ACCEPT 428 packets, 349386 bytes)
+    pkts      bytes target     prot opt in     out     source               destination         
+
+Chain POSTROUTING (policy ACCEPT 428 packets, 349386 bytes)
+    pkts      bytes target     prot opt in     out     source               destination         
+
+Chain DIFFER-TEST-1 (1 references)
+    pkts      bytes target     prot opt in     out     source               destination         
