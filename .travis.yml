@@ -1,0 +1,5 @@
+language: python
+install:
+  - pip install .
+  - pip install -r requirements
+script: make test
