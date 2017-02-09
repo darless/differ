@@ -14,7 +14,6 @@ RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -qy \
 RUN git clone https://github.com/MadRussian/differ.git /opt/differ
 
 # Move to the directory so we install the libraries in correct folder
-ADD Makefile /opt/differ
 RUN cd /opt/differ && make
 
 WORKDIR /opt/differ
