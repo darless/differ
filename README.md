@@ -1,3 +1,8 @@
+[![Build Status](https://travis-ci.org/MadRussian/differ.svg?branch=master)](https://travis-ci.org/MadRussian/differ)
+[![Coverage Status](https://coveralls.io/repos/github/MadRussian/differ/badge.svg)](https://coveralls.io/github/MadRussian/differ)
+[![Docker Automated buil](https://img.shields.io/docker/automated/madrussian/differ.svg)](https://hub.docker.com/r/madrussian/differ/)
+
+
 # differ
 Look at the difference between compressed files / directories / ...
 
