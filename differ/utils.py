@@ -4,154 +4,16 @@ import uuid
 import re
 import datetime
 import textwrap
+import stat
 
-import utils
 from plugins import PLUGINS
+from changes import Changes
+from paths import Paths
+from path import Path
 
 import logging
 import logging.config
 logger = logging.getLogger('differ.utils')
-
-class Paths(object):
-  def __init__(self, path):
-    self.paths = []
-    self.base = path
-    if path:
-      start = len(path) + 1
-      for root, dirs, files in os.walk(path):
-        for name in files:
-          fname = os.path.join(root, name)
-          logger.debug("base {} fname {}".format(self.base, fname))
-          fpath = fname[start:]
-          self.paths.append(fpath)
-
-  def __repr__(self):
-    return self.base
-
-  def has(self, path):
-    """Check whether a path exists in this object
-
-    :param path: The path to check
-    :return: True if path exists in the paths. False otherwise
-    """
-    return path in self.paths
-
-  def get(self, path):
-    """Get the full path of the path that is matched
-
-    :param path: The path to look for
-    :return: The full path that is matched against.
-    """
-    full = os.path.join(self.base, path)
-    PLUGINS.strip_hook(path, full)
-    return full
-
-class Path(object):
-  def __init__(self, path):
-    self.path = path
-    self.name = None
-    self.valid = False
-    if not path:
-      logger.error("No path passed in")
-      return
-    if not os.path.exists(self.path):
-      logger.error("Path {} does not exist".format(path))
-      return
-    self.name = os.path.basename(self.path)
-    self.valid = True
-
-  def extract_cmd(self, path):
-    """Given a path extract the contents
-
-    :param path: The path to extract
-    :return: The command string to run
-    """
-    cmd = None
-    exten_dict = {
-      '.tar':     'tar xf',
-      '.tar.gz':  'tar xzf',
-      '.tgz':     'tar xzf',
-      '.tar.bz2': 'tar xjf',
-      '.tar.xz':  'tar xJf',
-      '.zip':     'unzip'
-    }
-    if not path:
-      return None
-    for exten, prg in exten_dict.items():
-      if path.endswith(exten):
-        cmd = "{} {}".format(prg, path)
-        logger.debug("path: {} cmd: {}".format(path, cmd))
-        return cmd
-    return None
-
-  def extract_by_name(self, change_dir):
-    """Extract the path name
-
-    :param change_dir: The directory to change into before extracting
-    :return: True on success. False otherwise
-    """
-    if self.path is None:
-      logger.error("Path is None")
-      return False
-
-    full_path = self.name
-    if change_dir:
-      full_path = os.path.join(change_dir, self.name)
-
-    # If the path name doesn't exist then there is nothing to do
-    if not os.path.exists(full_path):
-      logger.error("{} does not exist".format(full_path))
-      return False
-
-    # If this is a directory then nothing to extract
-    if os.path.isdir(full_path):
-      logger.debug("Nothing to extract for a directory {}".format(
-        full_path))
-      return True
-
-    cmd = self.extract_cmd(self.name)
-    if not cmd:
-      logger.error("{}: No extraction command available".format(self.name))
-      return False
-
-    if change_dir is not None:
-      cmd = "cd {}; {}".format(change_dir, cmd)
-    logger.debug("{} cmd {}".format(self.name, cmd))
-    ret = os.system(cmd)
-    if ret != 0:
-      logger.error("Failed to run {}".format(cmd))
-      return False
-    return True
-
-  def copy(self, dest_dir):
-    """Copy the path to the destination directory
-
-    :param dest_dir: The destination directory
-    :return: True on success, False otherwise
-    """
-    if not dest_dir:
-      logger.error("No directory passed in")
-      return False
-
-    if not os.path.exists(dest_dir):
-      logger.error("Dest directory {} does not exist".format(dest_dir))
-      return False
-    cmd = None
-    if os.path.isfile(self.path):
-      cmd = "cp {} {}".format(self.path, dest_dir)
-    else:
-      cmd = "cp -R {} {}".format(self.path, dest_dir)
-    logger.debug("path {} name {} cmd {}".format(
-      self.path,
-      self.name,
-      cmd))
-    ret = os.system(cmd)
-    if ret != 0:
-      logger.error("Failed to copy {} to {}".format(
-        self.path,
-        dest_dir))
-      return False
-    return True
 
 class Differ(object):
   def __init__(self, path1, path2, base="diff_output"):
@@ -162,6 +24,7 @@ class Differ(object):
     :param base: Where to store the output
     """
     self._valid = False
+    self.changes = Changes()
     self.path1 = Path(path1)
     self.path2 = Path(path2)
     if self.path1.valid and self.path2.valid:
@@ -179,14 +42,6 @@ class Differ(object):
     self.diff_dir = os.path.join(base_dir, self.diff_dir)
     self.path1_dir = os.path.join(self.diff_dir, "path1")
     self.path2_dir = os.path.join(self.diff_dir, "path2")
-    self.changed_dir = os.path.join(self.diff_dir, "changed")
-    self.added_dir = os.path.join(self.diff_dir, "added")
-    self.removed_dir = os.path.join(self.diff_dir, "removed_dir")
-    self.summary_path = os.path.join(self.diff_dir, "summary")
-
-    self.add_list = []
-    self.rm_list = []
-    self.changed_list = []
 
   def __repr__(self):
     if self._valid:
@@ -224,15 +79,19 @@ class Differ(object):
     # Create the directory that will be used
     os.mkdir(self.diff_dir)
 
-    # Copy over the files
     self.path1.copy(self.diff_dir)
-    self.path2.copy(self.diff_dir)
-
-    # Extract paths
     self.extract_path(self.path1, self.path1_dir)
+
+    self.path2.copy(self.diff_dir)
     self.extract_path(self.path2,
       self.path2_dir,
       exclude_dir=self.path1_dir)
+
+    self.changed_dir = os.path.join(self.diff_dir, "changed")
+    self.added_dir = os.path.join(self.diff_dir, "added")
+    self.removed_dir = os.path.join(self.diff_dir, "removed_dir")
+    self.stat_dir = os.path.join(self.diff_dir, "stat_changed")
+    self.summary_path = os.path.join(self.diff_dir, "summary")
 
   def start(self):
     """Start the differ"""
@@ -257,9 +116,10 @@ class Differ(object):
     """Print the summary"""
     results = {
       'dir': self.diff_dir,
-      'added': len(self.add_list),
-      'removed': len(self.rm_list),
-      'changed': len(self.changed_list)
+      'added': len(self.changes.get_added()),
+      'removed': len(self.changes.get_removed()),
+      'changed': len(self.changes.get_changed()),
+      'changed_stat': len(self.changes.get_changed_stat()),
     }
     with open(self.summary_path, "w") as fp:
       fp.write("=" * 40)
@@ -269,6 +129,7 @@ class Differ(object):
         # of files added {added}
         # of files removed {removed}
         # of files changed {changed}
+        # of files changed stat {changed_stat}
         """.format(**results)))
 
     with open(self.summary_path, 'r') as fp:
@@ -287,7 +148,7 @@ class Differ(object):
     :param path: The path that was deleted
     """
     print("{} was removed".format(path))
-    self.rm_list.append(path)
+    self.changes.mark_deleted(path)
     item = self.path1_obj.get(path)
     result = os.path.join(self.removed_dir, path)
     self.create_path(result)
@@ -299,7 +160,7 @@ class Differ(object):
     :param path: The path that was added
     """
     print("{} was added".format(path))
-    self.add_list.append(path)
+    self.changes.mark_added(path)
     item = self.path2_obj.get(path)
     result = os.path.join(self.added_dir, path)
     self.create_path(result)
@@ -310,17 +171,116 @@ class Differ(object):
 
     :param path: The path to check
     """
+    self.compare_stat(path)
     logger.debug("{} is being compared".format(path))
     p1 = self.path1_obj.get(path)
     p2 = self.path2_obj.get(path)
+
+    # If either is a FIFO then don't try to do a diff
+    for item in [p1, p2]:
+      if get_file_type(item) == 'fifo':
+        logger.debug("Skipping diff of {} because its a FIFO".format(item))
+        return
+
     ret = os.system("diff -Naur {} {} > /dev/null 2>&1".format(p1, p2))
     if not ret:
       return
     result = os.path.join(self.changed_dir, path)
     self.create_path(result)
     os.system("diff -Naur {} {} > {}.diff".format(p1, p2, result))
-    os.system("diff -Naur {} {} > {}.diff".format(p1, p2, result))
-    self.changed_list.append(path)
+    self.changes.mark_changed(path)
+    self.changes.add_related(path, "{}.diff".format(result))
+
+  def _compare_mode(self, path):
+    """Compare the os.stat st_mode
+
+    :param path: The path to check
+    """
+    logger.debug("{} is being compared for stat mode".format(path))
+    p1 = self.path1_obj.get(path)
+    p2 = self.path2_obj.get(path)
+
+    p1_mode = os.stat(p1).st_mode
+    p2_mode = os.stat(p2).st_mode
+    logger.debug("{} p1 {} p2 {}".format(path, p1_mode, p2_mode))
+    if p1_mode == p2_mode:
+      return
+    result = os.path.join(self.stat_dir, path)
+    self.create_path(result)
+    output = "{}.mode".format(result)
+
+    self.changes.mark_changed_stat(path)
+    self.changes.add_related(path, output)
+
+    with open(output, 'w') as fp:
+      p1_perms = oct(p1_mode & 0777)
+      p2_perms = oct(p2_mode & 0777)
+      if p1_perms != p2_perms:
+        fp.write("Permissions {} => {}\n".format(
+          p1_perms,
+          p2_perms))
+
+      p1_type = get_file_type(p1)
+      p2_type = get_file_type(p2)
+      if p1_type != p2_type:
+        fp.write("File Type {} => {}\n".format(
+          p1_type,
+          p2_type))
+
+  def _compare_size(self, path):
+    """Compare the os.stat st_size
+
+    :param path: The path to check
+    """
+    logger.debug("{} is being compared for stat size".format(path))
+    p1 = self.path1_obj.get(path)
+    p2 = self.path2_obj.get(path)
+
+    p1_size = os.stat(p1).st_size
+    p2_size = os.stat(p2).st_size
+    if p1_size == p2_size:
+      return
+    result = os.path.join(self.stat_dir, path)
+    self.create_path(result)
+    output = "{}.size".format(result)
+
+    with open(output, 'w') as fp:
+      fp.write("Size {} => {}\n".format(
+        p1_size,
+        p2_size))
+
+    self.changes.mark_changed_stat(path)
+    self.changes.add_related(path, output)
+
+  def compare_stat(self, path):
+    """Check whether the path modes changed
+
+    :param path: The path to check
+    """
+    self._compare_mode(path)
+    self._compare_size(path)
+
+def get_file_type(path):
+  """Retrieve the file type of the path
+
+  :param path: The path to get the file type for
+  :return: The file type as a string or None on error
+  """
+  f_types = {
+    'socket':           stat.S_IFSOCK,
+    'regular':          stat.S_IFREG,
+    'block':            stat.S_IFBLK,
+    'directory':        stat.S_IFDIR,
+    'character_device': stat.S_IFCHR,
+    'fifo':             stat.S_IFIFO,
+  }
+  if not path or not os.path.exists(path):
+    return None
+
+  obj = os.stat(path).st_mode
+  for key,val in f_types.items():
+    if obj & val == val:
+      return key
 
 def setup_logging(level='INFO'):
   """Setup logging
@@ -345,9 +305,12 @@ def setup_logging(level='INFO'):
       },
     },
     "loggers": {
+      "differ.changes": LOGGER_DEFAULT,
       "differ.main": LOGGER_DEFAULT,
-      "differ.utils": LOGGER_DEFAULT,
+      "differ.path": LOGGER_DEFAULT,
+      "differ.paths": LOGGER_DEFAULT,
       "differ.plugins": LOGGER_DEFAULT,
+      "differ.utils": LOGGER_DEFAULT,
     },
     "root": {
       "handlers": ["console"],
