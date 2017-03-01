@@ -84,6 +84,7 @@ class Differ(object):
     self.changed_dir = os.path.join(self.diff_dir, "changed")
     self.added_dir = os.path.join(self.diff_dir, "added")
     self.removed_dir = os.path.join(self.diff_dir, "removed_dir")
+    self.summary_path = os.path.join(self.diff_dir, "summary")
 
     self.add_list = []
     self.rm_list = []
@@ -95,6 +96,32 @@ class Differ(object):
     else:
       return "NOT VALID: Path1 {} Path2: {}".format(self.path1, self.path2)
 
+  def extract_cmd(self, path):
+    """Given a path extract the contents
+
+    :param path: The path to extract
+    :return: The command string to run
+    """
+    cmd = None
+    if not path:
+      logger.error("No path provided")
+      return None
+
+    exten_dict = {
+      '.tar':     'tar xf',
+      '.tar.gz':  'tar xzf',
+      '.tgz':     'tar xzf',
+      '.tar.bz2': 'tar xjf',
+      '.tar.xz':  'tar xJf',
+      '.zip':     'unzip'
+    }
+    for exten, prg in exten_dict.items():
+      if path.endswith(exten):
+        cmd = "{} {}".format(prg, path)
+        logger.debug("path: {} cmd: {}".format(path, cmd))
+        return cmd
+    return None
+
   def setup(self):
     """Setup the directories necessary"""
     # Create the directory that will be used
@@ -103,16 +130,16 @@ class Differ(object):
     # Copy over the files
     os.system("cp {} {}".format(self.path1, self.diff_dir))
     os.system("cp {} {}".format(self.path2, self.diff_dir))
-    os.system("cd {}; tar xzf {}".format(
+    os.system("cd {}; {}".format(
       self.diff_dir,
-      self.path1_name))
+      self.extract_cmd(self.path1_name)))
     for item in os.listdir(self.diff_dir):
       path = "{}/{}".format(self.diff_dir, item)
       if os.path.isdir(path):
         os.system("mv {} {}".format(path, self.path1_dir))
-    os.system("cd {}; tar xzf {}".format(
+    os.system("cd {}; {}".format(
       self.diff_dir,
-      self.path2_name))
+      self.extract_cmd(self.path2_name)))
     for item in os.listdir(self.diff_dir):
       path = "{}/{}".format(self.diff_dir, item)
       if os.path.isdir(path) and path != self.path1_dir:
@@ -145,14 +172,18 @@ class Differ(object):
       'removed': len(self.rm_list),
       'changed': len(self.changed_list)
     }
-    print("=" * 40)
-    print(textwrap.dedent("""
-      Output directory: {dir}
+    with open(self.summary_path, "w") as fp:
+      fp.write("=" * 40)
+      fp.write(textwrap.dedent("""
+        Output directory: {dir}
 
-      # of files added {added}
-      # of files removed {removed}
-      # of files changed {changed}
-      """.format(**results)))
+        # of files added {added}
+        # of files removed {removed}
+        # of files changed {changed}
+        """.format(**results)))
+
+    with open(self.summary_path, 'r') as fp:
+      print(fp.read())
 
   def create_path(self, path):
     """Create the path specified
