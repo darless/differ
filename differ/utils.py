@@ -21,6 +21,7 @@ class Paths(object):
       for root, dirs, files in os.walk(path):
         for name in files:
           fname = os.path.join(root, name)
+          logger.debug("base {} fname {}".format(self.base, fname))
           fpath = fname[start:]
           self.paths.append(fpath)
 
@@ -45,6 +46,113 @@ class Paths(object):
     PLUGINS.strip_hook(path, full)
     return full
 
+class Path(object):
+  def __init__(self, path):
+    self.path = path
+    self.name = None
+    self.valid = False
+    if not path:
+      logger.error("No path passed in")
+      return
+    if not os.path.exists(self.path):
+      logger.error("Path {} does not exist".format(path))
+      return
+    self.name = os.path.basename(self.path)
+    self.valid = True
+
+  def extract_cmd(self, path):
+    """Given a path extract the contents
+
+    :param path: The path to extract
+    :return: The command string to run
+    """
+    cmd = None
+    exten_dict = {
+      '.tar':     'tar xf',
+      '.tar.gz':  'tar xzf',
+      '.tgz':     'tar xzf',
+      '.tar.bz2': 'tar xjf',
+      '.tar.xz':  'tar xJf',
+      '.zip':     'unzip'
+    }
+    if not path:
+      return None
+    for exten, prg in exten_dict.items():
+      if path.endswith(exten):
+        cmd = "{} {}".format(prg, path)
+        logger.debug("path: {} cmd: {}".format(path, cmd))
+        return cmd
+    return None
+
+  def extract_by_name(self, change_dir):
+    """Extract the path name
+
+    :param change_dir: The directory to change into before extracting
+    :return: True on success. False otherwise
+    """
+    if self.path is None:
+      logger.error("Path is None")
+      return False
+
+    full_path = self.name
+    if change_dir:
+      full_path = os.path.join(change_dir, self.name)
+
+    # If the path name doesn't exist then there is nothing to do
+    if not os.path.exists(full_path):
+      logger.error("{} does not exist".format(full_path))
+      return False
+
+    # If this is a directory then nothing to extract
+    if os.path.isdir(full_path):
+      logger.debug("Nothing to extract for a directory {}".format(
+        full_path))
+      return True
+
+    cmd = self.extract_cmd(self.name)
+    if not cmd:
+      logger.error("{}: No extraction command available".format(self.name))
+      return False
+
+    if change_dir is not None:
+      cmd = "cd {}; {}".format(change_dir, cmd)
+    logger.debug("{} cmd {}".format(self.name, cmd))
+    ret = os.system(cmd)
+    if ret != 0:
+      logger.error("Failed to run {}".format(cmd))
+      return False
+    return True
+
+  def copy(self, dest_dir):
+    """Copy the path to the destination directory
+
+    :param dest_dir: The destination directory
+    :return: True on success, False otherwise
+    """
+    if not dest_dir:
+      logger.error("No directory passed in")
+      return False
+
+    if not os.path.exists(dest_dir):
+      logger.error("Dest directory {} does not exist".format(dest_dir))
+      return False
+    cmd = None
+    if os.path.isfile(self.path):
+      cmd = "cp {} {}".format(self.path, dest_dir)
+    else:
+      cmd = "cp -R {} {}".format(self.path, dest_dir)
+    logger.debug("path {} name {} cmd {}".format(
+      self.path,
+      self.name,
+      cmd))
+    ret = os.system(cmd)
+    if ret != 0:
+      logger.error("Failed to copy {} to {}".format(
+        self.path,
+        dest_dir))
+      return False
+    return True
+
 class Differ(object):
   def __init__(self, path1, path2, base="diff_output"):
     """Initilize the Differ class
@@ -53,30 +161,20 @@ class Differ(object):
     :param path2: The path to compare against
     :param base: Where to store the output
     """
-    self.path1 = path1
-    self.path2 = path2
     self._valid = False
-    if not path1 or not path2:
-      logger.error("Both path1 and path2 must be specified")
-      return
-    if not os.path.exists(self.path1):
-      logger.error("Path1 {} does not exist".format(self.path1))
-      return
-    if not os.path.exists(self.path2):
-      logger.error("Path2 {} does not exist".format(self.path2))
-      return
-    self._valid = True
+    self.path1 = Path(path1)
+    self.path2 = Path(path2)
+    if self.path1.valid and self.path2.valid:
+      self._valid = True
 
-    self.path1_name = os.path.basename(self.path1)
-    self.path2_name = os.path.basename(self.path2)
     base_dir = os.getcwd()
     if base is not None:
       base_dir = base
     if not os.path.exists(base_dir):
       os.mkdir(base_dir)
     self.diff_dir = "diff.{}_{}.{}".format(
-      self.path1_name,
-      self.path2_name,
+      self.path1.name,
+      self.path2.name,
       datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     self.diff_dir = os.path.join(base_dir, self.diff_dir)
     self.path1_dir = os.path.join(self.diff_dir, "path1")
@@ -92,35 +190,34 @@ class Differ(object):
 
   def __repr__(self):
     if self._valid:
-      return "{} {}".format(self.path1_name, self.path2_name)
+      return "{} {}".format(self.path1.name, self.path2.name)
     else:
-      return "NOT VALID: Path1 {} Path2: {}".format(self.path1, self.path2)
+      return "NOT VALID: Path1 {} Path2: {}".format(self.path1.path, self.path2.path)
 
-  def extract_cmd(self, path):
-    """Given a path extract the contents
+  def extract_path(self, path, path_dir, exclude_dir=None):
+    """Extract a given path into the path directory
 
-    :param path: The path to extract
-    :return: The command string to run
+    :parma path: What to extract
+    :param path_dir: Where to extract it
+    :param exclude_dir: When moving items into the path_dir what directories
+                        to exclude
+    :return: True on success, False otherwise
     """
-    cmd = None
     if not path:
       logger.error("No path provided")
-      return None
+      return False
+    if not path_dir:
+      logger.error("No path directory provided")
+      return False
+    path.extract_by_name(self.diff_dir)
 
-    exten_dict = {
-      '.tar':     'tar xf',
-      '.tar.gz':  'tar xzf',
-      '.tgz':     'tar xzf',
-      '.tar.bz2': 'tar xjf',
-      '.tar.xz':  'tar xJf',
-      '.zip':     'unzip'
-    }
-    for exten, prg in exten_dict.items():
-      if path.endswith(exten):
-        cmd = "{} {}".format(prg, path)
-        logger.debug("path: {} cmd: {}".format(path, cmd))
-        return cmd
-    return None
+    for item in os.listdir(self.diff_dir):
+      full_path = "{}/{}".format(self.diff_dir, item)
+      if os.path.isdir(full_path):
+        if exclude_dir and full_path == exclude_dir:
+          continue
+        os.system("mv {} {}".format(full_path, path_dir))
+    return True
 
   def setup(self):
     """Setup the directories necessary"""
@@ -128,22 +225,14 @@ class Differ(object):
     os.mkdir(self.diff_dir)
 
     # Copy over the files
-    os.system("cp {} {}".format(self.path1, self.diff_dir))
-    os.system("cp {} {}".format(self.path2, self.diff_dir))
-    os.system("cd {}; {}".format(
-      self.diff_dir,
-      self.extract_cmd(self.path1_name)))
-    for item in os.listdir(self.diff_dir):
-      path = "{}/{}".format(self.diff_dir, item)
-      if os.path.isdir(path):
-        os.system("mv {} {}".format(path, self.path1_dir))
-    os.system("cd {}; {}".format(
-      self.diff_dir,
-      self.extract_cmd(self.path2_name)))
-    for item in os.listdir(self.diff_dir):
-      path = "{}/{}".format(self.diff_dir, item)
-      if os.path.isdir(path) and path != self.path1_dir:
-        os.system("mv {} {}".format(path, self.path2_dir))
+    self.path1.copy(self.diff_dir)
+    self.path2.copy(self.diff_dir)
+
+    # Extract paths
+    self.extract_path(self.path1, self.path1_dir)
+    self.extract_path(self.path2,
+      self.path2_dir,
+      exclude_dir=self.path1_dir)
 
   def start(self):
     """Start the differ"""
