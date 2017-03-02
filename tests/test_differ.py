@@ -81,14 +81,51 @@ class TestDiffer():
     assert len(obj.changes.get_added()) == 0
     assert len(obj.changes.get_removed()) == 0
     assert len(obj.changes.get_changed()) == 1
-    assert len(obj.changes.get_changed_stat()) == 3
+    assert len(obj.changes.get_changed_stat()) == 2
     assert os.path.exists(obj.summary_path)
     with open(obj.summary_path) as fp:
       summary = fp.read()
       assert "added 0" in summary
       assert "removed 0" in summary
       assert "changed 1" in summary
-      assert "changed stat 3" in summary
+      assert "changed stat 2" in summary
+
+  def test_differ_fifo(self):
+    """Test differ where there are fifo files"""
+
+    # Create 2 directories
+    before = os.path.join(self.base, "before_tmp")
+    after = os.path.join(self.base, "after_tmp")
+    os.makedirs(before)
+    os.makedirs(after)
+
+    os.system("mkfifo {}/test_file".format(before))
+    os.system("touch {}/test_file".format(after))
+
+    obj = differ.utils.Differ(
+      before,
+      after,
+      base=self.base)
+    assert obj._valid
+    obj.start()
+    assert len(obj.changes.get_added()) == 0
+    assert len(obj.changes.get_removed()) == 0
+    assert len(obj.changes.get_changed()) == 0
+    assert len(obj.changes.get_changed_stat()) == 1
+    assert os.path.exists(obj.summary_path)
+    with open(obj.summary_path) as fp:
+      summary = fp.read()
+      assert "added 0" in summary
+      assert "removed 0" in summary
+      assert "changed 0" in summary
+      assert "changed stat 1" in summary
+
+    changed_path = obj.changes.get_changed_stat()[0]
+    change = obj.changes.changes.get(changed_path)
+    assert change.related
+    with open(change.related[0], 'r') as fp:
+      mode = fp.read()
+      assert 'fifo => regular' in mode
 
   def test_plugin_iptables_strip(self):
     """Test the plugin iptables stripper"""
